@@ -17,3 +17,6 @@ portable-pty = "0.8"
 base64 = "0.21"
 # Async runtime for PTY reading
 tokio = { version = "1", features = ["full"] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
