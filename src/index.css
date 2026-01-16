@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  background-color: transparent;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: transparent; /* Allows blur if configured in tauri */
+  overflow: hidden;
+}
+
+#root {
+  background-color: transparent !important;
+}
+
+/* Xterm overrides */
+.xterm-viewport {
+  overflow-y: auto !important;
+}
