@@ -14,6 +14,9 @@ interface TiledPaneProps {
   getTerminalInstance: (tabId: string) => TerminalInstance | undefined;
 }
 
+// Target columns we want to fit in each tiled pane
+const TARGET_COLS = 105;
+
 export function TiledPane({
   group,
   tabs,
@@ -26,6 +29,12 @@ export function TiledPane({
   getTerminalInstance,
 }: TiledPaneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Calculate reduced font size for tiled panes
+  // Scale down based on number of columns to fit ~105 chars
+  // For 2 cols: ~55% font size, for 3 cols: ~40% font size
+  const fontScaleFactor = group.layout.cols === 1 ? 1 : (1 / group.layout.cols) * 1.1;
+  const tiledFontSize = Math.max(Math.round(fontSize * fontScaleFactor), 8);
 
   // Build grid template based on layout
   const gridStyle = {
@@ -115,24 +124,14 @@ export function TiledPane({
                   }}
                 />
               )}
-              {/* Scaled terminal container - scale down to fit more content */}
-              <div
-                style={{
-                  width: "111.11%", // 1/0.9 to compensate for scale
-                  height: "111.11%",
-                  transform: "scale(0.9)",
-                  transformOrigin: "top left",
-                }}
-              >
-                <TerminalPane
-                  tab={tab}
-                  isActive={isActive}
-                  fontFamily={fontFamily}
-                  fontSize={fontSize}
-                  onRegisterInstance={onRegisterInstance}
-                  onRequestScanBlocks={onRequestScanBlocks}
-                />
-              </div>
+              <TerminalPane
+                tab={tab}
+                isActive={isActive}
+                fontFamily={fontFamily}
+                fontSize={tiledFontSize}
+                onRegisterInstance={onRegisterInstance}
+                onRequestScanBlocks={onRequestScanBlocks}
+              />
             </div>
           );
         })}
