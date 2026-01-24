@@ -47,7 +47,9 @@ interface PtyOutputPayload {
 
 const DEFAULT_FONT =
   '"JetBrainsMono Nerd Font", "JetBrains Mono", "Apple Color Emoji", monospace';
-const DEFAULT_FONT_SIZE = 16;
+const BASE_FONT_SIZE = 16; // 100% reference
+const DEFAULT_ZOOM = 90; // Default zoom percentage
+const ZOOM_STEP = 2; // Zoom increment in percent
 const FONTS = [
   {
     name: "JetBrains Mono (Nerd)",
@@ -116,10 +118,13 @@ export default function App() {
   const [fontFamily, setFontFamily] = useState(
     localStorage.getItem("shelll-font") || DEFAULT_FONT
   );
-  const [fontSize, setFontSize] = useState(
-    parseInt(localStorage.getItem("shelll-fontSize") || String(DEFAULT_FONT_SIZE))
+  const [zoomPercent, setZoomPercent] = useState(
+    parseInt(localStorage.getItem("shelll-zoom") || String(DEFAULT_ZOOM))
   );
   const [customFont, setCustomFont] = useState("");
+
+  // Calculate actual font size from zoom percentage
+  const fontSize = Math.round(BASE_FONT_SIZE * zoomPercent / 100);
   const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null);
 
   // Terminal container ref for finding panes
@@ -294,21 +299,21 @@ export default function App() {
       // Cmd+Plus or Cmd+= to zoom in
       if (e.metaKey && (e.key === "+" || e.key === "=")) {
         e.preventDefault();
-        setFontSize((prev) => Math.min(prev + 2, 32));
+        setZoomPercent((prev) => Math.min(prev + ZOOM_STEP, 200));
         return;
       }
 
       // Cmd+Minus to zoom out
       if (e.metaKey && e.key === "-") {
         e.preventDefault();
-        setFontSize((prev) => Math.max(prev - 2, 8));
+        setZoomPercent((prev) => Math.max(prev - ZOOM_STEP, 50));
         return;
       }
 
-      // Cmd+0 to reset font size
+      // Cmd+0 to reset zoom
       if (e.metaKey && e.key === "0") {
         e.preventDefault();
-        setFontSize(DEFAULT_FONT_SIZE);
+        setZoomPercent(DEFAULT_ZOOM);
         return;
       }
     };
@@ -322,10 +327,10 @@ export default function App() {
     localStorage.setItem("shelll-font", fontFamily);
   }, [fontFamily]);
 
-  // Update font size in localStorage when it changes
+  // Update zoom in localStorage when it changes
   useEffect(() => {
-    localStorage.setItem("shelll-fontSize", String(fontSize));
-  }, [fontSize]);
+    localStorage.setItem("shelll-zoom", String(zoomPercent));
+  }, [zoomPercent]);
 
   // Block Scanning Logic
   const scanBlocks = useCallback(() => {
@@ -683,9 +688,9 @@ export default function App() {
           {/* Zoom level indicator */}
           <div
             className="flex items-center gap-1 px-2 py-1 rounded text-xs font-mono text-white/50"
-            title={`Font size: ${fontSize}px (Cmd+/- to zoom, Cmd+0 to reset)`}
+            title={`Zoom: ${zoomPercent}% (${fontSize}px) - Cmd+/- to zoom, Cmd+0 to reset`}
           >
-            <span>{fontSize === DEFAULT_FONT_SIZE ? "100%" : `${Math.round((fontSize / DEFAULT_FONT_SIZE) * 100)}%`}</span>
+            <span>{zoomPercent}%</span>
           </div>
 
           <button
@@ -929,9 +934,9 @@ export default function App() {
             <button
               onClick={() => {
                 setFontFamily(DEFAULT_FONT);
-                setFontSize(DEFAULT_FONT_SIZE);
+                setZoomPercent(DEFAULT_ZOOM);
                 localStorage.removeItem("shelll-font");
-                localStorage.removeItem("shelll-fontSize");
+                localStorage.removeItem("shelll-zoom");
                 setShowFontSettings(false);
               }}
               className="w-full px-2 py-1.5 rounded text-sm text-white/60 hover:bg-white/5 hover:text-white text-left"
