@@ -205,7 +205,8 @@ fn create_pty_session(app_handle: tauri::AppHandle, state: tauri::State<AppState
     let pty_system = NativePtySystem::default();
     let mut cmd = CommandBuilder::new("zsh");
     cmd.env("TERM", "xterm-256color");
-    cmd.args(["-c", "export PROMPT_EOL_MARK=''; exec zsh"]);
+    // Use login shell for proper initialization
+    cmd.args(["-l"]);
 
     if let Ok(cwd) = env::current_dir() {
         cmd.cwd(cwd);
