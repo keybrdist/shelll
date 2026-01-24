@@ -57,8 +57,13 @@ export function TerminalPane({
     onRegisterInstance(tab.id, { terminal: term, fitAddon });
 
     // Data flow - write to specific session
+    // Always filter out focus reporting sequences (\x1b[I and \x1b[O)
+    // These cause issues with CLI apps like Claude Code since shelll
+    // frequently gains/loses focus as an overlay terminal
     term.onData((data) => {
-      invoke("write_to_pty", { sessionId: tab.sessionId, data });
+      const filtered = data.replace(/\x1b\[I/g, '').replace(/\x1b\[O/g, '');
+      if (filtered.length === 0) return;
+      invoke("write_to_pty", { sessionId: tab.sessionId, data: filtered });
     });
 
     // Resize observer
