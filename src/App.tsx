@@ -25,11 +25,13 @@ import "xterm/css/xterm.css";
 import clsx from "clsx";
 
 import { useTabManager } from "./hooks/useTabManager";
+import { useTabGroups } from "./hooks/useTabGroups";
 import { useWindowAttachment } from "./hooks/useWindowAttachment";
 import { TabBar } from "./components/TabBar";
 import { TerminalPane } from "./components/TerminalPane";
+import { TiledPane } from "./components/TiledPane";
 import { AppPicker } from "./components/AppPicker";
-import type { TerminalInstance } from "./types/tab";
+import type { TerminalInstance, Tab } from "./types/tab";
 
 interface Block {
   id: string;
@@ -88,6 +90,30 @@ function redactText(text: string): string {
 export default function App() {
   // Tab Manager
   const tabManager = useTabManager();
+
+  // Tab Groups
+  const tabGroups = useTabGroups(tabManager.tabs, (updater) => {
+    // This is a workaround since we can't directly access setTabs
+    // The useTabGroups hook needs access to update tabs
+    // For now, we'll handle this through the tabManager
+  });
+
+  // For tab groups, we need direct access to setTabs
+  const [tabs, setTabs] = useState<Tab[]>([]);
+
+  // Sync tabs state with tabManager
+  useEffect(() => {
+    setTabs(tabManager.tabs);
+  }, [tabManager.tabs]);
+
+  // Re-initialize tab groups with the synced tabs
+  const tabGroupsManager = useTabGroups(tabs, setTabs);
+
+  // Active group state
+  const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
+
+  // Selection state for combining tabs
+  const [selectedTabIds, setSelectedTabIds] = useState<Set<string>>(new Set());
 
   // Window Attachment
   const windowAttachment = useWindowAttachment();
@@ -171,7 +197,14 @@ export default function App() {
       // Cmd+W - Close current tab
       if (e.metaKey && e.key === "w") {
         e.preventDefault();
-        if (tabManager.activeTabId) {
+        if (activeGroupId) {
+          // If in a group, close focused pane
+          const group = tabGroupsManager.getGroup(activeGroupId);
+          if (group) {
+            tabGroupsManager.handleTabCloseInGroup(group.focusedTabId);
+            tabManager.closeTab(group.focusedTabId);
+          }
+        } else if (tabManager.activeTabId) {
           tabManager.closeTab(tabManager.activeTabId);
         }
         return;
@@ -181,6 +214,7 @@ export default function App() {
       if (e.metaKey && e.shiftKey && e.key === "[") {
         e.preventDefault();
         tabManager.switchToPreviousTab();
+        setActiveGroupId(null);
         return;
       }
 
@@ -188,16 +222,57 @@ export default function App() {
       if (e.metaKey && e.shiftKey && e.key === "]") {
         e.preventDefault();
         tabManager.switchToNextTab();
+        setActiveGroupId(null);
         return;
       }
 
       // Cmd+Shift+P - Toggle pin
       if (e.metaKey && e.shiftKey && e.key === "p") {
         e.preventDefault();
-        if (tabManager.activeTabId) {
+        if (activeGroupId) {
+          tabGroupsManager.toggleGroupPin(activeGroupId);
+        } else if (tabManager.activeTabId) {
           tabManager.togglePin(tabManager.activeTabId);
         }
         return;
+      }
+
+      // Cmd+Shift+G - Combine selected tabs
+      if (e.metaKey && e.shiftKey && e.key === "g") {
+        e.preventDefault();
+        if (selectedTabIds.size >= 2) {
+          handleCombineSelected();
+        }
+        return;
+      }
+
+      // Cmd+Shift+D - Detach focused pane from group
+      if (e.metaKey && e.shiftKey && e.key === "d") {
+        e.preventDefault();
+        if (activeGroupId) {
+          const group = tabGroupsManager.getGroup(activeGroupId);
+          if (group) {
+            tabGroupsManager.detachTab(activeGroupId, group.focusedTabId);
+            tabManager.switchTab(group.focusedTabId);
+            setActiveGroupId(null);
+          }
+        }
+        return;
+      }
+
+      // Cmd+Option+Arrow - Navigate between panes in group
+      if (e.metaKey && e.altKey && activeGroupId) {
+        let direction: "left" | "right" | "up" | "down" | null = null;
+        if (e.key === "ArrowLeft") direction = "left";
+        if (e.key === "ArrowRight") direction = "right";
+        if (e.key === "ArrowUp") direction = "up";
+        if (e.key === "ArrowDown") direction = "down";
+
+        if (direction) {
+          e.preventDefault();
+          tabGroupsManager.navigatePane(activeGroupId, direction);
+          return;
+        }
       }
 
       // Cmd+1-9 - Switch to tab N
@@ -205,6 +280,7 @@ export default function App() {
         e.preventDefault();
         const index = parseInt(e.key) - 1;
         tabManager.switchToTabByIndex(index);
+        setActiveGroupId(null);
         return;
       }
 
@@ -232,7 +308,7 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [tabManager]);
+  }, [tabManager, tabGroupsManager, activeGroupId, selectedTabIds]);
 
   // Update font in localStorage when it changes
   useEffect(() => {
@@ -246,13 +322,24 @@ export default function App() {
 
   // Block Scanning Logic
   const scanBlocks = useCallback(() => {
-    if (!tabManager.activeTabId) return;
+    if (!tabManager.activeTabId && !activeGroupId) return;
 
     const container = terminalContainerRef.current;
     if (!container) return;
 
+    // Determine which tab to scan
+    let targetTabId = tabManager.activeTabId;
+    if (activeGroupId) {
+      const group = tabGroupsManager.getGroup(activeGroupId);
+      if (group) {
+        targetTabId = group.focusedTabId;
+      }
+    }
+
+    if (!targetTabId) return;
+
     const pane = container.querySelector(
-      `[data-tab-id="${tabManager.activeTabId}"]`
+      `[data-tab-id="${targetTabId}"]`
     ) as any;
     if (!pane || !pane.__terminal) return;
 
@@ -305,7 +392,44 @@ export default function App() {
       });
     }
     setBlocks(foundBlocks);
-  }, [tabManager.activeTabId]);
+  }, [tabManager.activeTabId, activeGroupId, tabGroupsManager]);
+
+  // Tab selection toggle
+  const toggleTabSelection = useCallback((tabId: string) => {
+    setSelectedTabIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(tabId)) {
+        next.delete(tabId);
+      } else {
+        next.add(tabId);
+      }
+      return next;
+    });
+  }, []);
+
+  // Combine selected tabs
+  const handleCombineSelected = useCallback(() => {
+    if (selectedTabIds.size < 2) return;
+    const group = tabGroupsManager.combineTabs(Array.from(selectedTabIds));
+    if (group) {
+      setActiveGroupId(group.id);
+      setSelectedTabIds(new Set());
+    }
+  }, [selectedTabIds, tabGroupsManager]);
+
+  // Select a single tab
+  const handleSelectTab = useCallback(
+    (tabId: string) => {
+      tabManager.switchTab(tabId);
+      setActiveGroupId(null);
+    },
+    [tabManager]
+  );
+
+  // Select a group
+  const handleSelectGroup = useCallback((groupId: string) => {
+    setActiveGroupId(groupId);
+  }, []);
 
   // Actions
   const handleCopy = async (text: string, id: string) => {
@@ -430,6 +554,19 @@ export default function App() {
     },
     [tabManager]
   );
+
+  // Handle closing a tab (with group awareness)
+  const handleCloseTab = useCallback(
+    (tabId: string) => {
+      tabGroupsManager.handleTabCloseInGroup(tabId);
+      tabManager.closeTab(tabId);
+    },
+    [tabManager, tabGroupsManager]
+  );
+
+  // Get tabs not in any group
+  const groupedTabIds = new Set(tabGroupsManager.groups.flatMap((g) => g.tabIds));
+  const singleTabs = tabManager.tabs.filter((t) => !groupedTabIds.has(t.id));
 
   return (
     <div
@@ -603,28 +740,59 @@ export default function App() {
 
       {/* Tab Bar */}
       <TabBar
-        tabs={tabManager.sortedTabs}
+        tabViews={tabGroupsManager.tabViews}
         activeTabId={tabManager.activeTabId}
-        onSelectTab={tabManager.switchTab}
-        onCloseTab={tabManager.closeTab}
+        activeGroupId={activeGroupId}
+        selectedTabIds={selectedTabIds}
+        onSelectTab={handleSelectTab}
+        onSelectGroup={handleSelectGroup}
+        onCloseTab={handleCloseTab}
         onNewTab={tabManager.createTab}
         onTogglePin={tabManager.togglePin}
+        onToggleGroupPin={tabGroupsManager.toggleGroupPin}
+        onToggleSelection={toggleTabSelection}
+        onCombineSelected={handleCombineSelected}
+        onDetachTab={tabGroupsManager.detachTab}
       />
 
       {/* Terminal Container */}
       <div className="flex-1 relative p-4 pl-6 overflow-hidden" ref={terminalContainerRef}>
-        {/* Render all terminal panes - visibility controlled by CSS */}
-        {tabManager.tabs.map((tab) => (
+        {/* Render single terminal panes (not in groups) */}
+        {singleTabs.map((tab) => (
           <TerminalPane
             key={tab.id}
             tab={tab}
-            isActive={tab.id === tabManager.activeTabId}
+            isActive={tab.id === tabManager.activeTabId && !activeGroupId}
             fontFamily={fontFamily}
             fontSize={fontSize}
             onRegisterInstance={handleRegisterInstance}
             onRequestScanBlocks={scanBlocks}
           />
         ))}
+
+        {/* Render tiled pane groups */}
+        {tabGroupsManager.groups.map((group) => {
+          const groupTabs = group.tabIds
+            .map((id) => tabManager.tabs.find((t) => t.id === id))
+            .filter((t): t is Tab => t !== undefined);
+
+          if (groupTabs.length < 2) return null;
+
+          return (
+            <TiledPane
+              key={group.id}
+              group={group}
+              tabs={groupTabs}
+              isActive={group.id === activeGroupId}
+              fontFamily={fontFamily}
+              fontSize={fontSize}
+              onRegisterInstance={handleRegisterInstance}
+              onRequestScanBlocks={scanBlocks}
+              onFocusPane={tabGroupsManager.setFocusedPane}
+              getTerminalInstance={tabManager.getTerminalInstance}
+            />
+          );
+        })}
 
         {/* Block Overlays */}
         <div className="absolute top-4 left-6 right-4 bottom-4 pointer-events-none">
