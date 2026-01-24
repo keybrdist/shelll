@@ -267,7 +267,9 @@ fn write_to_pty(session_id: String, data: String, state: tauri::State<AppState>)
     let sessions = state.sessions.lock().map_err(|_| "Lock poisoned")?;
     if let Some(session) = sessions.get(&session_id) {
         if let Ok(mut writer) = session.writer.lock() {
-            let _ = write!(writer, "{}", data);
+            // Write raw bytes directly, don't use write! macro formatting
+            let _ = writer.write_all(data.as_bytes());
+            let _ = writer.flush();
         }
     }
     Ok(())
