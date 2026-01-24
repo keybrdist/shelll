@@ -47,7 +47,7 @@ interface PtyOutputPayload {
 
 const DEFAULT_FONT =
   '"JetBrainsMono Nerd Font", "JetBrains Mono", "Apple Color Emoji", monospace';
-const DEFAULT_FONT_SIZE = 14;
+const DEFAULT_FONT_SIZE = 16;
 const FONTS = [
   {
     name: "JetBrains Mono (Nerd)",
@@ -679,6 +679,14 @@ export default function App() {
               <span>Copy Basket ({selectedBlockIds.size})</span>
             </button>
           )}
+
+          {/* Zoom level indicator */}
+          <div
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs font-mono text-white/50"
+            title={`Font size: ${fontSize}px (Cmd+/- to zoom, Cmd+0 to reset)`}
+          >
+            <span>{fontSize === DEFAULT_FONT_SIZE ? "100%" : `${Math.round((fontSize / DEFAULT_FONT_SIZE) * 100)}%`}</span>
+          </div>
 
           <button
             onClick={() => {
