@@ -115,25 +115,24 @@ export function TiledPane({
                   }}
                 />
               )}
-              {/* Pane label */}
+              {/* Scaled terminal container - scale down to fit more content */}
               <div
-                className="absolute top-1 left-1 px-1.5 py-0.5 rounded text-xs z-10 truncate max-w-[80%]"
                 style={{
-                  backgroundColor: "rgba(0, 0, 0, 0.5)",
-                  color: "rgba(255, 255, 255, 0.7)",
-                  fontSize: "10px",
+                  width: "111.11%", // 1/0.9 to compensate for scale
+                  height: "111.11%",
+                  transform: "scale(0.9)",
+                  transformOrigin: "top left",
                 }}
               >
-                {tab.title}
+                <TerminalPane
+                  tab={tab}
+                  isActive={isActive}
+                  fontFamily={fontFamily}
+                  fontSize={fontSize}
+                  onRegisterInstance={onRegisterInstance}
+                  onRequestScanBlocks={onRequestScanBlocks}
+                />
               </div>
-              <TerminalPane
-                tab={tab}
-                isActive={isActive}
-                fontFamily={fontFamily}
-                fontSize={fontSize}
-                onRegisterInstance={onRegisterInstance}
-                onRequestScanBlocks={onRequestScanBlocks}
-              />
             </div>
           );
         })}
