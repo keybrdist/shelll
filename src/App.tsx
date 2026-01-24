@@ -91,23 +91,8 @@ export default function App() {
   // Tab Manager
   const tabManager = useTabManager();
 
-  // Tab Groups
-  const tabGroups = useTabGroups(tabManager.tabs, (updater) => {
-    // This is a workaround since we can't directly access setTabs
-    // The useTabGroups hook needs access to update tabs
-    // For now, we'll handle this through the tabManager
-  });
-
-  // For tab groups, we need direct access to setTabs
-  const [tabs, setTabs] = useState<Tab[]>([]);
-
-  // Sync tabs state with tabManager
-  useEffect(() => {
-    setTabs(tabManager.tabs);
-  }, [tabManager.tabs]);
-
-  // Re-initialize tab groups with the synced tabs
-  const tabGroupsManager = useTabGroups(tabs, setTabs);
+  // Tab Groups - just pass tabs, no state sync needed
+  const tabGroupsManager = useTabGroups(tabManager.tabs);
 
   // Active group state
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
@@ -558,11 +543,22 @@ export default function App() {
   // Handle closing a tab (with group awareness)
   const handleCloseTab = useCallback(
     (tabId: string) => {
-      tabGroupsManager.handleTabCloseInGroup(tabId);
+      const affectedGroupId = tabGroupsManager.handleTabCloseInGroup(tabId);
       tabManager.closeTab(tabId);
+      // If the active group was dissolved, clear it
+      if (affectedGroupId && !tabGroupsManager.groupExists(affectedGroupId)) {
+        setActiveGroupId(null);
+      }
     },
     [tabManager, tabGroupsManager]
   );
+
+  // Clear activeGroupId if the group no longer exists
+  useEffect(() => {
+    if (activeGroupId && !tabGroupsManager.groupExists(activeGroupId)) {
+      setActiveGroupId(null);
+    }
+  }, [activeGroupId, tabGroupsManager]);
 
   // Get tabs not in any group
   const groupedTabIds = new Set(tabGroupsManager.groups.flatMap((g) => g.tabIds));

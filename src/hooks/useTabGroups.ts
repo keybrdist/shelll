@@ -19,10 +19,7 @@ export function calculateTileLayout(count: number): TileLayout {
 
 let groupCounter = 0;
 
-export function useTabGroups(
-  tabs: Tab[],
-  setTabs: React.Dispatch<React.SetStateAction<Tab[]>>
-) {
+export function useTabGroups(tabs: Tab[]) {
   const [groups, setGroups] = useState<TabGroup[]>([]);
 
   /**
@@ -54,9 +51,9 @@ export function useTabGroups(
         pinnedAt: wasPinned ? Date.now() : undefined,
       };
 
-      // Remove tabs from existing groups
-      setGroups((prev) =>
-        prev
+      // Remove tabs from existing groups, then add new group
+      setGroups((prev) => {
+        const updated = prev
           .map((g) => ({
             ...g,
             tabIds: g.tabIds.filter((id) => !tabIds.includes(id)),
@@ -64,24 +61,14 @@ export function useTabGroups(
               g.tabIds.filter((id) => !tabIds.includes(id)).length
             ),
           }))
-          .filter((g) => g.tabIds.length >= 2)
-      );
+          .filter((g) => g.tabIds.length >= 2);
 
-      // Update tabs with new groupId
-      setTabs((prev) =>
-        prev.map((t) =>
-          tabIds.includes(t.id)
-            ? { ...t, groupId, isPinned: false, pinnedAt: undefined }
-            : t
-        )
-      );
-
-      // Add new group
-      setGroups((prev) => [...prev, newGroup]);
+        return [...updated, newGroup];
+      });
 
       return newGroup;
     },
-    [tabs, setTabs]
+    [tabs]
   );
 
   /**
@@ -89,35 +76,18 @@ export function useTabGroups(
    */
   const detachTab = useCallback(
     (groupId: string, tabId: string) => {
-      const group = groups.find((g) => g.id === groupId);
-      if (!group) return;
+      setGroups((prev) => {
+        const group = prev.find((g) => g.id === groupId);
+        if (!group) return prev;
 
-      const remainingTabIds = group.tabIds.filter((id) => id !== tabId);
-      const tab = tabs.find((t) => t.id === tabId);
+        const remainingTabIds = group.tabIds.filter((id) => id !== tabId);
 
-      // Update the tab to remove group association
-      setTabs((prev) =>
-        prev.map((t) =>
-          t.id === tabId
-            ? { ...t, groupId: undefined, isPinned: group.isPinned }
-            : t
-        )
-      );
-
-      if (remainingTabIds.length < 2) {
-        // Dissolve the group - restore remaining tab to normal state
-        setTabs((prev) =>
-          prev.map((t) =>
-            remainingTabIds.includes(t.id)
-              ? { ...t, groupId: undefined, isPinned: group.isPinned }
-              : t
-          )
-        );
-        setGroups((prev) => prev.filter((g) => g.id !== groupId));
-      } else {
-        // Update group with remaining tabs
-        setGroups((prev) =>
-          prev.map((g) =>
+        if (remainingTabIds.length < 2) {
+          // Dissolve the group
+          return prev.filter((g) => g.id !== groupId);
+        } else {
+          // Update group with remaining tabs
+          return prev.map((g) =>
             g.id === groupId
               ? {
                   ...g,
@@ -129,11 +99,11 @@ export function useTabGroups(
                   layout: calculateTileLayout(remainingTabIds.length),
                 }
               : g
-          )
-        );
-      }
+          );
+        }
+      });
     },
-    [groups, tabs, setTabs]
+    []
   );
 
   /**
@@ -141,38 +111,33 @@ export function useTabGroups(
    */
   const addToGroup = useCallback(
     (groupId: string, tabId: string) => {
-      const group = groups.find((g) => g.id === groupId);
-      const tab = tabs.find((t) => t.id === tabId);
-      if (!group || !tab) return;
+      setGroups((prev) => {
+        // First remove from any existing group
+        let updated = prev.map((g) => {
+          if (g.tabIds.includes(tabId)) {
+            const newTabIds = g.tabIds.filter((id) => id !== tabId);
+            return {
+              ...g,
+              tabIds: newTabIds,
+              layout: calculateTileLayout(newTabIds.length),
+            };
+          }
+          return g;
+        }).filter((g) => g.tabIds.length >= 2 || g.id === groupId);
 
-      // If tab is in another group, remove it first
-      if (tab.groupId && tab.groupId !== groupId) {
-        detachTab(tab.groupId, tabId);
-      }
-
-      const newTabIds = [...group.tabIds, tabId];
-
-      setTabs((prev) =>
-        prev.map((t) =>
-          t.id === tabId
-            ? { ...t, groupId, isPinned: false, pinnedAt: undefined }
-            : t
-        )
-      );
-
-      setGroups((prev) =>
-        prev.map((g) =>
+        // Then add to target group
+        return updated.map((g) =>
           g.id === groupId
             ? {
                 ...g,
-                tabIds: newTabIds,
-                layout: calculateTileLayout(newTabIds.length),
+                tabIds: [...g.tabIds, tabId],
+                layout: calculateTileLayout(g.tabIds.length + 1),
               }
             : g
-        )
-      );
+        );
+      });
     },
-    [groups, tabs, setTabs, detachTab]
+    []
   );
 
   /**
@@ -189,58 +154,63 @@ export function useTabGroups(
    */
   const navigatePane = useCallback(
     (groupId: string, direction: "next" | "prev" | "up" | "down" | "left" | "right") => {
-      const group = groups.find((g) => g.id === groupId);
-      if (!group) return;
+      setGroups((prev) => {
+        const group = prev.find((g) => g.id === groupId);
+        if (!group) return prev;
 
-      const currentIndex = group.tabIds.indexOf(group.focusedTabId);
-      if (currentIndex === -1) return;
+        const currentIndex = group.tabIds.indexOf(group.focusedTabId);
+        if (currentIndex === -1) return prev;
 
-      const { rows, cols } = group.layout;
-      let newIndex = currentIndex;
+        const { rows, cols } = group.layout;
+        let newIndex = currentIndex;
 
-      switch (direction) {
-        case "next":
-          newIndex = (currentIndex + 1) % group.tabIds.length;
-          break;
-        case "prev":
-          newIndex =
-            (currentIndex - 1 + group.tabIds.length) % group.tabIds.length;
-          break;
-        case "right":
-          newIndex = currentIndex + 1;
-          if (newIndex % cols === 0 || newIndex >= group.tabIds.length) {
-            newIndex = currentIndex - (currentIndex % cols);
-          }
-          break;
-        case "left":
-          newIndex = currentIndex - 1;
-          if (currentIndex % cols === 0) {
-            newIndex = Math.min(
-              currentIndex + cols - 1,
-              group.tabIds.length - 1
-            );
-          }
-          break;
-        case "down":
-          newIndex = currentIndex + cols;
-          if (newIndex >= group.tabIds.length) {
-            newIndex = currentIndex % cols;
-          }
-          break;
-        case "up":
-          newIndex = currentIndex - cols;
-          if (newIndex < 0) {
-            const lastRowStart = Math.floor((group.tabIds.length - 1) / cols) * cols;
-            newIndex = Math.min(lastRowStart + (currentIndex % cols), group.tabIds.length - 1);
-          }
-          break;
-      }
+        switch (direction) {
+          case "next":
+            newIndex = (currentIndex + 1) % group.tabIds.length;
+            break;
+          case "prev":
+            newIndex =
+              (currentIndex - 1 + group.tabIds.length) % group.tabIds.length;
+            break;
+          case "right":
+            newIndex = currentIndex + 1;
+            if (newIndex % cols === 0 || newIndex >= group.tabIds.length) {
+              newIndex = currentIndex - (currentIndex % cols);
+            }
+            break;
+          case "left":
+            newIndex = currentIndex - 1;
+            if (currentIndex % cols === 0) {
+              newIndex = Math.min(
+                currentIndex + cols - 1,
+                group.tabIds.length - 1
+              );
+            }
+            break;
+          case "down":
+            newIndex = currentIndex + cols;
+            if (newIndex >= group.tabIds.length) {
+              newIndex = currentIndex % cols;
+            }
+            break;
+          case "up":
+            newIndex = currentIndex - cols;
+            if (newIndex < 0) {
+              const lastRowStart = Math.floor((group.tabIds.length - 1) / cols) * cols;
+              newIndex = Math.min(lastRowStart + (currentIndex % cols), group.tabIds.length - 1);
+            }
+            break;
+        }
 
-      if (newIndex >= 0 && newIndex < group.tabIds.length) {
-        setFocusedPane(groupId, group.tabIds[newIndex]);
-      }
+        if (newIndex >= 0 && newIndex < group.tabIds.length && newIndex !== currentIndex) {
+          return prev.map((g) =>
+            g.id === groupId ? { ...g, focusedTabId: g.tabIds[newIndex] } : g
+          );
+        }
+        return prev;
+      });
     },
-    [groups, setFocusedPane]
+    []
   );
 
   /**
@@ -264,46 +234,45 @@ export function useTabGroups(
 
   const toggleGroupPin = useCallback(
     (groupId: string) => {
-      const group = groups.find((g) => g.id === groupId);
-      if (group) {
-        if (group.isPinned) {
-          unpinGroup(groupId);
-        } else {
-          pinGroup(groupId);
-        }
-      }
+      setGroups((prev) => {
+        const group = prev.find((g) => g.id === groupId);
+        if (!group) return prev;
+        return prev.map((g) =>
+          g.id === groupId
+            ? {
+                ...g,
+                isPinned: !g.isPinned,
+                pinnedAt: !g.isPinned ? Date.now() : undefined,
+              }
+            : g
+        );
+      });
     },
-    [groups, pinGroup, unpinGroup]
+    []
   );
 
   /**
-   * Handle tab closure within a group.
+   * Handle tab closure - remove from group if present.
+   * Returns the groupId if the tab was in a group (for cleanup).
    */
   const handleTabCloseInGroup = useCallback(
-    (tabId: string) => {
-      const tab = tabs.find((t) => t.id === tabId);
-      if (!tab?.groupId) return false;
+    (tabId: string): string | null => {
+      let affectedGroupId: string | null = null;
 
-      const group = groups.find((g) => g.id === tab.groupId);
-      if (!group) return false;
+      setGroups((prev) => {
+        const group = prev.find((g) => g.tabIds.includes(tabId));
+        if (!group) return prev;
 
-      const remainingTabIds = group.tabIds.filter((id) => id !== tabId);
+        affectedGroupId = group.id;
+        const remainingTabIds = group.tabIds.filter((id) => id !== tabId);
 
-      if (remainingTabIds.length < 2) {
-        // Dissolve the group
-        setTabs((prev) =>
-          prev.map((t) =>
-            remainingTabIds.includes(t.id)
-              ? { ...t, groupId: undefined, isPinned: group.isPinned }
-              : t
-          )
-        );
-        setGroups((prev) => prev.filter((g) => g.id !== tab.groupId));
-      } else {
-        // Update group with remaining tabs
-        setGroups((prev) =>
-          prev.map((g) =>
-            g.id === tab.groupId
+        if (remainingTabIds.length < 2) {
+          // Dissolve the group
+          return prev.filter((g) => g.id !== group.id);
+        } else {
+          // Update group with remaining tabs
+          return prev.map((g) =>
+            g.id === group.id
               ? {
                   ...g,
                   tabIds: remainingTabIds,
@@ -314,13 +283,13 @@ export function useTabGroups(
                   layout: calculateTileLayout(remainingTabIds.length),
                 }
               : g
-          )
-        );
-      }
+          );
+        }
+      });
 
-      return true;
+      return affectedGroupId;
     },
-    [tabs, groups, setTabs]
+    []
   );
 
   /**
@@ -332,15 +301,19 @@ export function useTabGroups(
   );
 
   /**
-   * Get group for a specific tab.
+   * Get group containing a specific tab.
    */
   const getGroupForTab = useCallback(
-    (tabId: string) => {
-      const tab = tabs.find((t) => t.id === tabId);
-      if (!tab?.groupId) return null;
-      return groups.find((g) => g.id === tab.groupId) || null;
-    },
-    [tabs, groups]
+    (tabId: string) => groups.find((g) => g.tabIds.includes(tabId)) || null,
+    [groups]
+  );
+
+  /**
+   * Check if a group still exists (hasn't been dissolved).
+   */
+  const groupExists = useCallback(
+    (groupId: string) => groups.some((g) => g.id === groupId),
+    [groups]
   );
 
   /**
@@ -405,6 +378,7 @@ export function useTabGroups(
     handleTabCloseInGroup,
     getGroup,
     getGroupForTab,
+    groupExists,
   };
 }
 
