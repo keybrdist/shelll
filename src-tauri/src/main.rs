@@ -1,13 +1,20 @@
+#![allow(unexpected_cfgs)]
+
 use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem, MasterPty};
 use std::collections::HashMap;
 use std::env;
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Duration;
 use tauri::Manager;
 use uuid::Uuid;
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+#[cfg(target_os = "macos")]
+use objc::{msg_send, sel, sel_impl, class};
 
 struct PtySession {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -22,6 +29,173 @@ struct AppState {
 struct PtyOutputPayload {
     session_id: String,
     data: Vec<u8>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct RunningApp {
+    name: String,
+    bundle_id: String,
+}
+
+#[derive(Clone, Serialize)]
+struct FocusChangedPayload {
+    focused_app: String,
+    is_target_focused: bool,
+    is_self_focused: bool,
+}
+
+// Global flag to control focus monitoring
+static FOCUS_MONITOR_ACTIVE: AtomicBool = AtomicBool::new(false);
+static FOCUS_MONITOR_TARGET: Mutex<Option<String>> = Mutex::new(None);
+
+#[cfg(target_os = "macos")]
+fn get_frontmost_app_name() -> Option<String> {
+    unsafe {
+        let workspace: *mut objc::runtime::Object = msg_send![class!(NSWorkspace), sharedWorkspace];
+        let frontmost_app: *mut objc::runtime::Object = msg_send![workspace, frontmostApplication];
+        if frontmost_app.is_null() {
+            return None;
+        }
+        let name: *mut objc::runtime::Object = msg_send![frontmost_app, localizedName];
+        if name.is_null() {
+            return None;
+        }
+        let utf8: *const i8 = msg_send![name, UTF8String];
+        if utf8.is_null() {
+            return None;
+        }
+        Some(std::ffi::CStr::from_ptr(utf8).to_string_lossy().into_owned())
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn get_frontmost_app_name() -> Option<String> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn get_running_applications() -> Vec<RunningApp> {
+    unsafe {
+        let workspace: *mut objc::runtime::Object = msg_send![class!(NSWorkspace), sharedWorkspace];
+        let apps: *mut objc::runtime::Object = msg_send![workspace, runningApplications];
+        let count: usize = msg_send![apps, count];
+
+        let mut result = Vec::new();
+
+        for i in 0..count {
+            let app: *mut objc::runtime::Object = msg_send![apps, objectAtIndex: i];
+
+            // Check if it's a regular app (not background)
+            let activation_policy: i64 = msg_send![app, activationPolicy];
+            if activation_policy != 0 {
+                continue; // Skip non-regular apps
+            }
+
+            let name: *mut objc::runtime::Object = msg_send![app, localizedName];
+            let bundle_id: *mut objc::runtime::Object = msg_send![app, bundleIdentifier];
+
+            if name.is_null() {
+                continue;
+            }
+
+            let name_utf8: *const i8 = msg_send![name, UTF8String];
+            let name_str = if !name_utf8.is_null() {
+                std::ffi::CStr::from_ptr(name_utf8).to_string_lossy().into_owned()
+            } else {
+                continue;
+            };
+
+            let bundle_str = if !bundle_id.is_null() {
+                let bundle_utf8: *const i8 = msg_send![bundle_id, UTF8String];
+                if !bundle_utf8.is_null() {
+                    std::ffi::CStr::from_ptr(bundle_utf8).to_string_lossy().into_owned()
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            };
+
+            result.push(RunningApp {
+                name: name_str,
+                bundle_id: bundle_str,
+            });
+        }
+
+        // Sort by name
+        result.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        result
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn get_running_applications() -> Vec<RunningApp> {
+    Vec::new()
+}
+
+#[tauri::command]
+fn get_running_apps() -> Vec<RunningApp> {
+    get_running_applications()
+}
+
+#[tauri::command]
+fn get_frontmost_app() -> Option<String> {
+    get_frontmost_app_name()
+}
+
+#[tauri::command]
+fn start_focus_monitor(app_handle: tauri::AppHandle, target_app: String) {
+    // Set the target and activate monitoring
+    if let Ok(mut target) = FOCUS_MONITOR_TARGET.lock() {
+        *target = Some(target_app.clone());
+    }
+
+    // If already running, just update target
+    if FOCUS_MONITOR_ACTIVE.load(Ordering::SeqCst) {
+        return;
+    }
+
+    FOCUS_MONITOR_ACTIVE.store(true, Ordering::SeqCst);
+
+    thread::spawn(move || {
+        let mut last_app: Option<String> = None;
+
+        while FOCUS_MONITOR_ACTIVE.load(Ordering::SeqCst) {
+            if let Some(current_app) = get_frontmost_app_name() {
+                // Only emit if changed
+                if last_app.as_ref() != Some(&current_app) {
+                    last_app = Some(current_app.clone());
+
+                    let target = FOCUS_MONITOR_TARGET.lock()
+                        .ok()
+                        .and_then(|t| t.clone());
+
+                    if let Some(target_name) = target {
+                        let is_self = current_app == "Shelll" || current_app == "shelll";
+                        let is_target = current_app == target_name;
+
+                        let payload = FocusChangedPayload {
+                            focused_app: current_app,
+                            is_target_focused: is_target,
+                            is_self_focused: is_self,
+                        };
+
+                        let _ = app_handle.emit_all("app-focus-changed", payload);
+                    }
+                }
+            }
+
+            thread::sleep(Duration::from_millis(200));
+        }
+    });
+}
+
+#[tauri::command]
+fn stop_focus_monitor() {
+    FOCUS_MONITOR_ACTIVE.store(false, Ordering::SeqCst);
+    if let Ok(mut target) = FOCUS_MONITOR_TARGET.lock() {
+        *target = None;
+    }
 }
 
 #[tauri::command]
@@ -141,7 +315,11 @@ fn main() {
             create_pty_session,
             write_to_pty,
             resize_pty,
-            close_pty_session
+            close_pty_session,
+            get_running_apps,
+            get_frontmost_app,
+            start_focus_monitor,
+            stop_focus_monitor
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

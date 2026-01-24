@@ -18,6 +18,9 @@ base64 = "0.21"
 uuid = { version = "1.0", features = ["v4"] }
 # Async runtime for PTY reading
 tokio = { version = "1", features = ["full"] }
+# macOS APIs for window attachment feature
+cocoa = "0.25"
+objc = "0.2"
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

@@ -18,14 +18,17 @@ import {
   Command,
   Settings,
   Layout,
-  Ghost,
+  Link,
+  Unlink,
 } from "lucide-react";
 import "xterm/css/xterm.css";
 import clsx from "clsx";
 
 import { useTabManager } from "./hooks/useTabManager";
+import { useWindowAttachment } from "./hooks/useWindowAttachment";
 import { TabBar } from "./components/TabBar";
 import { TerminalPane } from "./components/TerminalPane";
+import { AppPicker } from "./components/AppPicker";
 import type { TerminalInstance } from "./types/tab";
 
 interface Block {
@@ -42,6 +45,7 @@ interface PtyOutputPayload {
 
 const DEFAULT_FONT =
   '"JetBrainsMono Nerd Font", "JetBrains Mono", "Apple Color Emoji", monospace';
+const DEFAULT_FONT_SIZE = 14;
 const FONTS = [
   {
     name: "JetBrains Mono (Nerd)",
@@ -85,6 +89,10 @@ export default function App() {
   // Tab Manager
   const tabManager = useTabManager();
 
+  // Window Attachment
+  const windowAttachment = useWindowAttachment();
+  const [showAppPicker, setShowAppPicker] = useState(false);
+
   // State
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -97,10 +105,11 @@ export default function App() {
   const [fontFamily, setFontFamily] = useState(
     localStorage.getItem("shelll-font") || DEFAULT_FONT
   );
+  const [fontSize, setFontSize] = useState(
+    parseInt(localStorage.getItem("shelll-fontSize") || String(DEFAULT_FONT_SIZE))
+  );
   const [customFont, setCustomFont] = useState("");
   const [hoveredBlockId, setHoveredBlockId] = useState<string | null>(null);
-  const [isGhostMode, setIsGhostMode] = useState(false);
-  const [isHoveringWindow, setIsHoveringWindow] = useState(true);
 
   // Terminal container ref for finding panes
   const terminalContainerRef = useRef<HTMLDivElement>(null);
@@ -198,6 +207,27 @@ export default function App() {
         tabManager.switchToTabByIndex(index);
         return;
       }
+
+      // Cmd+Plus or Cmd+= to zoom in
+      if (e.metaKey && (e.key === "+" || e.key === "=")) {
+        e.preventDefault();
+        setFontSize((prev) => Math.min(prev + 2, 32));
+        return;
+      }
+
+      // Cmd+Minus to zoom out
+      if (e.metaKey && e.key === "-") {
+        e.preventDefault();
+        setFontSize((prev) => Math.max(prev - 2, 8));
+        return;
+      }
+
+      // Cmd+0 to reset font size
+      if (e.metaKey && e.key === "0") {
+        e.preventDefault();
+        setFontSize(DEFAULT_FONT_SIZE);
+        return;
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -208,6 +238,11 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("shelll-font", fontFamily);
   }, [fontFamily]);
+
+  // Update font size in localStorage when it changes
+  useEffect(() => {
+    localStorage.setItem("shelll-fontSize", String(fontSize));
+  }, [fontSize]);
 
   // Block Scanning Logic
   const scanBlocks = useCallback(() => {
@@ -399,16 +434,10 @@ export default function App() {
   return (
     <div
       className={clsx(
-        "relative w-screen h-screen overflow-hidden flex flex-col font-sans transition-all duration-300 ease-in-out",
-        "bg-neutral-950/70",
-        isGhostMode && !isHoveringWindow ? "opacity-20" : "opacity-100"
+        "relative w-screen h-screen overflow-hidden flex flex-col font-sans",
+        "bg-neutral-950/70"
       )}
-      onMouseMove={(e) => {
-        handleMouseMove(e);
-        if (!isHoveringWindow) setIsHoveringWindow(true);
-      }}
-      onMouseEnter={() => setIsHoveringWindow(true)}
-      onMouseLeave={() => setIsHoveringWindow(false)}
+      onMouseMove={handleMouseMove}
       onClickCapture={handleWrapperClick}
     >
       {/* Header */}
@@ -459,14 +488,29 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setIsGhostMode(!isGhostMode)}
+            onClick={() => {
+              setShowAppPicker(!showAppPicker);
+              setShowFontSettings(false);
+              setShowResizeSettings(false);
+              setShowCmdPalette(false);
+            }}
             className={clsx(
               "transition-colors",
-              isGhostMode ? "text-purple-400" : "text-white/40 hover:text-white"
+              windowAttachment.isAttached
+                ? "text-purple-400"
+                : "text-white/40 hover:text-white"
             )}
-            title="Toggle Ghost Mode (Fade on Blur)"
+            title={
+              windowAttachment.isAttached
+                ? `Attached to ${windowAttachment.attachedApp?.name}`
+                : "Attach to App"
+            }
           >
-            <Ghost size={14} />
+            {windowAttachment.isAttached ? (
+              <Link size={14} />
+            ) : (
+              <Unlink size={14} />
+            )}
           </button>
         </div>
 
@@ -486,6 +530,7 @@ export default function App() {
               setShowFontSettings(!showFontSettings);
               setShowResizeSettings(false);
               setShowCmdPalette(false);
+              setShowAppPicker(false);
             }}
             className={clsx(
               "p-1.5 rounded hover:bg-white/10 transition-colors",
@@ -503,6 +548,7 @@ export default function App() {
               setShowResizeSettings(!showResizeSettings);
               setShowFontSettings(false);
               setShowCmdPalette(false);
+              setShowAppPicker(false);
             }}
             className={clsx(
               "p-1.5 rounded hover:bg-white/10 transition-colors",
@@ -520,6 +566,7 @@ export default function App() {
               setShowCmdPalette(!showCmdPalette);
               setShowFontSettings(false);
               setShowResizeSettings(false);
+              setShowAppPicker(false);
             }}
             className={clsx(
               "p-1.5 rounded hover:bg-white/10 transition-colors",
@@ -573,6 +620,7 @@ export default function App() {
             tab={tab}
             isActive={tab.id === tabManager.activeTabId}
             fontFamily={fontFamily}
+            fontSize={fontSize}
             onRegisterInstance={handleRegisterInstance}
             onRequestScanBlocks={scanBlocks}
           />
@@ -729,6 +777,18 @@ export default function App() {
           ))}
         </div>
       )}
+
+      {/* App Picker Modal */}
+      <AppPicker
+        isOpen={showAppPicker}
+        onClose={() => setShowAppPicker(false)}
+        runningApps={windowAttachment.runningApps}
+        attachedApp={windowAttachment.attachedApp}
+        isLoading={windowAttachment.isLoading}
+        onAttach={windowAttachment.attachToApp}
+        onDetach={windowAttachment.detach}
+        onRefresh={windowAttachment.fetchRunningApps}
+      />
     </div>
   );
 }

@@ -9,6 +9,7 @@ interface TerminalPaneProps {
   tab: Tab;
   isActive: boolean;
   fontFamily: string;
+  fontSize: number;
   onRegisterInstance: (tabId: string, instance: TerminalInstance) => void;
   onRequestScanBlocks: () => void;
 }
@@ -17,6 +18,7 @@ export function TerminalPane({
   tab,
   isActive,
   fontFamily,
+  fontSize,
   onRegisterInstance,
   onRequestScanBlocks,
 }: TerminalPaneProps) {
@@ -32,7 +34,7 @@ export function TerminalPane({
 
     const term = new Terminal({
       fontFamily,
-      fontSize: 14,
+      fontSize,
       cursorBlink: true,
       allowProposedApi: true,
       theme: {
@@ -81,7 +83,7 @@ export function TerminalPane({
       resizeObserver.disconnect();
       // Don't dispose terminal here - it will be disposed by tab manager on close
     };
-  }, [tab.id, tab.sessionId, fontFamily, onRegisterInstance, onRequestScanBlocks]);
+  }, [tab.id, tab.sessionId, fontFamily, fontSize, onRegisterInstance, onRequestScanBlocks]);
 
   // Update font when it changes
   useEffect(() => {
@@ -90,6 +92,14 @@ export function TerminalPane({
       fitAddonRef.current?.fit();
     }
   }, [fontFamily]);
+
+  // Update font size when it changes
+  useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.options.fontSize = fontSize;
+      fitAddonRef.current?.fit();
+    }
+  }, [fontSize]);
 
   // Focus terminal when tab becomes active
   useEffect(() => {
