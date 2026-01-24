@@ -50,6 +50,10 @@ export function TerminalPane({
     term.open(containerRef.current);
     fitAddon.fit();
 
+    // Disable focus reporting mode explicitly
+    // Send: CSI ? 1004 l (disable focus reporting)
+    term.write('\x1b[?1004l');
+
     terminalRef.current = term;
     fitAddonRef.current = fitAddon;
 
@@ -57,11 +61,18 @@ export function TerminalPane({
     onRegisterInstance(tab.id, { terminal: term, fitAddon });
 
     // Data flow - write to specific session
-    // Always filter out focus reporting sequences (\x1b[I and \x1b[O)
-    // These cause issues with CLI apps like Claude Code since shelll
-    // frequently gains/loses focus as an overlay terminal
+    // Filter out focus reporting sequences and other problematic escape codes
     term.onData((data) => {
-      const filtered = data.replace(/\x1b\[I/g, '').replace(/\x1b\[O/g, '');
+      // Filter focus events: ESC [ I (focus in) and ESC [ O (focus out)
+      // These are sent when focus reporting is enabled (\x1b[?1004h)
+      let filtered = data;
+
+      // Remove focus in/out sequences (multiple possible formats)
+      filtered = filtered.replace(/\x1b\[I/g, '');
+      filtered = filtered.replace(/\x1b\[O/g, '');
+      filtered = filtered.replace(/\x1bI/g, '');  // Some terminals use shorter form
+      filtered = filtered.replace(/\x1bO/g, '');
+
       if (filtered.length === 0) return;
       invoke("write_to_pty", { sessionId: tab.sessionId, data: filtered });
     });

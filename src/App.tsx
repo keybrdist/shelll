@@ -134,7 +134,29 @@ export default function App() {
   useEffect(() => {
     const unlisten = listen<PtyOutputPayload>("pty-output", (event) => {
       const { session_id, data } = event.payload;
-      const byteData = new Uint8Array(data);
+      let byteData = new Uint8Array(data);
+
+      // Filter out focus reporting sequences from PTY output
+      // These can appear if the shell echoes them back
+      // ESC [ I (focus in) = 0x1B 0x5B 0x49
+      // ESC [ O (focus out) = 0x1B 0x5B 0x4F
+      const filtered: number[] = [];
+      for (let i = 0; i < byteData.length; i++) {
+        // Check for ESC [ I or ESC [ O sequence
+        if (byteData[i] === 0x1B && i + 2 < byteData.length) {
+          if (byteData[i + 1] === 0x5B) {
+            if (byteData[i + 2] === 0x49 || byteData[i + 2] === 0x4F) {
+              // Skip this 3-byte sequence
+              i += 2;
+              continue;
+            }
+          }
+        }
+        filtered.push(byteData[i]);
+      }
+      byteData = new Uint8Array(filtered);
+
+      if (byteData.length === 0) return;
 
       // Find the tab with this session ID
       const tab = tabManager.tabs.find((t) => t.sessionId === session_id);
