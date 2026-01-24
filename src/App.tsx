@@ -924,6 +924,21 @@ export default function App() {
               </button>
             </div>
           </div>
+
+          <div className="mt-3 pt-3 border-t border-white/5">
+            <button
+              onClick={() => {
+                setFontFamily(DEFAULT_FONT);
+                setFontSize(DEFAULT_FONT_SIZE);
+                localStorage.removeItem("shelll-font");
+                localStorage.removeItem("shelll-fontSize");
+                setShowFontSettings(false);
+              }}
+              className="w-full px-2 py-1.5 rounded text-sm text-white/60 hover:bg-white/5 hover:text-white text-left"
+            >
+              Reset to Defaults
+            </button>
+          </div>
         </div>
       )}
 
