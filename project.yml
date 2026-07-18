@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=.constellation/project.schema.json
+config_version: 1
+project:
+  id: shelll
+  name: Shelll (Tauri overlay terminal)
+  family: studio
+git_host:
+  provider: github
+  slug: keybrdist/shelll
+tracker:
+  adapter: github
+  project_key: keybrdist/shelll
+deploy:
+  provider: desktop
+  method: none
+loops: []
+ci:
+  provider: none
